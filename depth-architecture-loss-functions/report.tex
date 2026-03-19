@@ -1,0 +1,121 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{float}
+\usepackage[hidelinks]{hyperref}
+
+\title{Assignment 1: Depth, Architecture, and Loss Functions in Neural Networks}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-1.5cm}
+
+\section{Setup}
+
+All experiments were implemented in PyTorch using the Adam optimizer with a learning rate of $10^{-3}$. For Parts A, B, and D we used the Wine Quality dataset from the UCI repository (red and white combined: 6{,}497 samples, 11 physicochemical features, 7 quality classes). The data was split into 65\% training, 15\% validation, and 20\% test, with features standardized using training set statistics. For Parts C and D we used Fashion-MNIST (60{,}000 grayscale 28$\times$28 images, 10 classes), split into 50k/10k/10k with normalization and light augmentation (random horizontal flip, rotation).
+
+\section{Part A: Shallow vs Deep Networks}
+
+We trained a shallow network (1 hidden layer, width 300, approximately 6{,}300 parameters) and a deep network (7 hidden layers, width 32, approximately 7{,}400 parameters) on Wine Quality, each with CrossEntropy and MSE. The parameter budgets were matched as closely as possible given the structural constraints.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+Model & Loss & Test Acc & Test F1 \\
+\midrule
+Shallow (1 layer) & CrossEntropy & 0.562 & 0.544 \\
+Deep (7 layers) & CrossEntropy & 0.564 & 0.558 \\
+Shallow (1 layer) & MSE & 0.572 & 0.550 \\
+Deep (7 layers) & MSE & \textbf{0.594} & \textbf{0.577} \\
+\bottomrule
+\end{tabular}
+\caption{Part A test performance on Wine Quality.}
+\end{table}
+
+The deep network achieved the highest test accuracy (59.4\%) with MSE, but also exhibited the largest train--test gap: training accuracy reached approximately 73\% while test accuracy plateaued around 59\%, indicating substantial overfitting. The shallow network showed a smaller gap (train 66\%, test 57\%), which is expected since a single wide layer has fewer opportunities to memorize training patterns. These results confirm that depth enables richer hierarchical feature combinations, but on a small dataset with limited samples, the added capacity leads to overfitting without additional regularization.
+
+An interesting observation is that MSE outperformed CrossEntropy for both architectures on this task. This may relate to the ordinal nature of Wine Quality: MSE penalizes predictions proportionally to their distance from the true class, so predicting quality 5 when the truth is 6 is penalized less than predicting 3. CrossEntropy treats all misclassifications equally, disregarding this ordinal structure.
+
+\section{Part B: Loss Function Experiments}
+
+We compared four loss functions on Wine Quality using a shallow network (width 256): CrossEntropy, MSE, MAE, and Huber (SmoothL1). To test robustness, we repeated the experiments after corrupting 10\% of training labels with random incorrect classes.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+Loss Function & Clean Acc & Noisy Acc & Drop \\
+\midrule
+CrossEntropy & 0.582 & 0.562 & 0.019 \\
+MSE & 0.569 & 0.560 & 0.009 \\
+MAE (L1) & 0.549 & 0.538 & 0.012 \\
+Huber & \textbf{0.582} & \textbf{0.579} & \textbf{0.003} \\
+\bottomrule
+\end{tabular}
+\caption{Part B: loss function comparison with clean and noisy (10\% corrupted) labels.}
+\end{table}
+
+CrossEntropy and Huber tied for best clean accuracy at 58.2\%, but their robustness profiles differed considerably. CrossEntropy suffered the largest degradation under noise (1.9 percentage points) because it produces strong gradients for confident-but-wrong predictions, causing the model to aggressively fit mislabeled samples. Huber loss showed remarkable noise robustness with only a 0.3 point drop, owing to its linear penalty for large errors which prevents it from over-reacting to outliers. MAE converged slowest and achieved the lowest accuracy overall; its constant gradient magnitude makes optimization unstable near the minimum, which is a known limitation for classification tasks. MSE fell between CrossEntropy and MAE in both accuracy and robustness.
+
+\section{Part C: Convolutional Networks and Residual Connections}
+
+We implemented three CNN architectures on Fashion-MNIST: a shallow CNN (3 convolutional layers with BatchNorm), a deep plain CNN (12 convolutional layers without BatchNorm or skip connections), and a residual CNN (12 convolutional layers with BatchNorm and skip connections every 2 layers). The deep plain CNN intentionally omits BatchNorm to expose the gradient degradation problem that occurs in deep networks without mechanisms to aid gradient flow.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lccccc}
+\toprule
+Architecture & Params & CE Acc & CE F1 & MSE Acc & MSE F1 \\
+\midrule
+Shallow CNN (3 layers) & 242k & 0.926 & 0.925 & 0.922 & 0.922 \\
+Deep CNN plain (12 layers) & 445k & 0.911 & 0.911 & 0.915 & 0.915 \\
+Residual CNN (12 layers) & 447k & \textbf{0.932} & \textbf{0.932} & \textbf{0.926} & \textbf{0.925} \\
+\bottomrule
+\end{tabular}
+\caption{Part C test performance on Fashion-MNIST.}
+\end{table}
+
+The results clearly demonstrate the degradation problem: despite having nearly twice the parameters, the deep plain CNN (91.1\%) performed worse than even the shallow CNN (92.6\%). Adding more layers without skip connections or batch normalization impeded gradient flow through the network, causing early layers to learn slowly or not at all. The residual CNN resolved this by adding identity shortcut connections, allowing gradients to flow directly through the skip paths during backpropagation. With the same 12-layer depth, the residual CNN achieved the best performance at 93.2\%, surpassing both the deep plain and shallow architectures. This confirms the core insight from the ResNet literature: skip connections allow the network to learn residual mappings $F(x) = H(x) - x$ rather than full mappings, making optimization easier and enabling the benefits of depth to be realized.
+
+\section{Part D: Custom Loss --- Focal Loss}
+
+We implemented Focal Loss, defined as $\text{FL}(p_t) = -(1 - p_t)^\gamma \log(p_t)$ with $\gamma = 2$, where $p_t$ is the predicted probability for the true class. When the model is already confident and correct ($p_t$ near 1), the $(1 - p_t)^\gamma$ term reduces the loss to near zero, effectively down-weighting easy examples. When the model is uncertain or wrong ($p_t$ near 0), the loss remains close to standard CrossEntropy. The motivation was to address the class imbalance in Wine Quality, where quality scores 5 and 6 account for over 75\% of all samples.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lccc}
+\toprule
+& \multicolumn{2}{c}{Wine Quality} \\
+\cmidrule(lr){2-3}
+Model & CrossEntropy & Focal Loss \\
+\midrule
+Shallow & 0.575 & \textbf{0.588} \\
+Deep & \textbf{0.583} & 0.563 \\
+\bottomrule
+\end{tabular}
+\quad
+\begin{tabular}{lccc}
+\toprule
+& \multicolumn{2}{c}{Fashion-MNIST} \\
+\cmidrule(lr){2-3}
+Model & CrossEntropy & Focal Loss \\
+\midrule
+Shallow CNN & \textbf{0.926} & 0.913 \\
+Residual CNN & \textbf{0.925} & 0.918 \\
+\bottomrule
+\end{tabular}
+\caption{Part D: Focal Loss vs CrossEntropy (test accuracy).}
+\end{table}
+
+On Wine Quality, Focal Loss improved the shallow network by 1.3 percentage points, confirming its effectiveness for imbalanced classification. However, it degraded the deep network, likely because the deep model already overfits, and Focal Loss's aggressive focusing on hard examples amplified this tendency. On Fashion-MNIST, which has perfectly balanced classes, Focal Loss consistently underperformed CrossEntropy. When classes are balanced, down-weighting correctly classified examples removes useful gradient signal without providing the compensatory benefit of improved minority-class learning. This demonstrates that custom loss functions must be matched to the specific properties of the data rather than applied indiscriminately.
+
+\section{Summary}
+
+Across all experiments, three main findings emerged. First, network depth enables learning richer feature representations but comes with a cost: without mechanisms to support gradient flow (such as batch normalization or residual connections), deeper networks can perform worse than shallow ones, as demonstrated in both the tabular (Part A overfitting) and image (Part C degradation) experiments. Second, the choice of loss function has meaningful effects beyond raw accuracy: Huber loss proved most robust to label noise, CrossEntropy provided the strongest convergence for clean classification, and Focal Loss offered targeted improvements for class-imbalanced data. Third, architectural innovations like residual connections are not merely incremental improvements but fundamental enablers of depth, transforming a 12-layer network from underperforming a 3-layer baseline to outperforming it.
+
+\end{document}

@@ -45,6 +45,7 @@ all_idx = np.arange(N)
 train_pool, test_idx = train_test_split(all_idx, test_size=0.2, random_state=42, stratify=labels.numpy())
 test_mask = torch.zeros(N, dtype=torch.bool)
 test_mask[test_idx] = True
+test_mask = test_mask.to(device)
 
 
 # ── Model ────────────────────────────────────────────────────────────────────
@@ -88,6 +89,7 @@ def train_supervised(label_frac):
     labeled_idx = train_pool[:n_labeled]
     labeled_mask = torch.zeros(N, dtype=torch.bool)
     labeled_mask[labeled_idx] = True
+    labeled_mask = labeled_mask.to(device)
 
     model = FusionGNN(128, EMBED_DIM, NUM_CLASSES).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
@@ -116,9 +118,9 @@ def train_pseudo_labels(label_frac):
     labeled_idx = train_pool[:n_labeled]
     unlabeled_idx = train_pool[n_labeled:]
 
-    labeled_mask = torch.zeros(N, dtype=torch.bool)
+    labeled_mask = torch.zeros(N, dtype=torch.bool, device=device)
     labeled_mask[labeled_idx] = True
-    unlabeled_mask = torch.zeros(N, dtype=torch.bool)
+    unlabeled_mask = torch.zeros(N, dtype=torch.bool, device=device)
     unlabeled_mask[unlabeled_idx] = True
 
     model = FusionGNN(128, EMBED_DIM, NUM_CLASSES).to(device)
@@ -136,7 +138,6 @@ def train_pseudo_labels(label_frac):
                 logits = model(fused_d, fused_edges_d)
                 probs = F.softmax(logits, dim=1)
                 max_probs, preds = probs.max(dim=1)
-                # Use high-confidence predictions as pseudo-labels
                 confident = max_probs > 0.9
                 pseudo_mask = labeled_mask | (unlabeled_mask & confident)
                 pseudo_labels[unlabeled_mask & confident] = preds[unlabeled_mask & confident]
@@ -162,9 +163,9 @@ def train_mean_teacher(label_frac):
     n_labeled = int(len(train_pool) * label_frac)
     labeled_idx = train_pool[:n_labeled]
 
-    labeled_mask = torch.zeros(N, dtype=torch.bool)
+    labeled_mask = torch.zeros(N, dtype=torch.bool, device=device)
     labeled_mask[labeled_idx] = True
-    unlabeled_mask = torch.zeros(N, dtype=torch.bool)
+    unlabeled_mask = torch.zeros(N, dtype=torch.bool, device=device)
     unlabeled_mask[train_pool[n_labeled:]] = True
 
     student = FusionGNN(128, EMBED_DIM, NUM_CLASSES).to(device)
@@ -217,9 +218,9 @@ def train_pseudo_and_teacher(label_frac):
     labeled_idx = train_pool[:n_labeled]
     unlabeled_idx = train_pool[n_labeled:]
 
-    labeled_mask = torch.zeros(N, dtype=torch.bool)
+    labeled_mask = torch.zeros(N, dtype=torch.bool, device=device)
     labeled_mask[labeled_idx] = True
-    unlabeled_mask = torch.zeros(N, dtype=torch.bool)
+    unlabeled_mask = torch.zeros(N, dtype=torch.bool, device=device)
     unlabeled_mask[unlabeled_idx] = True
 
     student = FusionGNN(128, EMBED_DIM, NUM_CLASSES).to(device)

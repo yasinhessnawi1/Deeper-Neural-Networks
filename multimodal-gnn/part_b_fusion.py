@@ -201,7 +201,7 @@ print("\n  Text-to-Image retrieval (5 examples):")
 print(f"  {'Query (text)':<40s} {'Retrieved Category':<20s} {'Match'}")
 print(f"  {'-'*40} {'-'*20} {'-'*5}")
 
-test_indices = torch.where(test_mask)[0][:5]
+test_indices = torch.where(test_mask)[0][:5].tolist()
 for idx in test_indices:
     # Query: zero image + valid text -> fused, then project through model
     query_text = text_embeds[idx]

@@ -93,7 +93,7 @@ print(f"  CLIP embedding shape: {clip_embeddings.shape}")
 # ── Load Part A embeddings ───────────────────────────────────────────────────
 print("\n[4/4] Comparing embeddings ...")
 
-part_a = torch.load("embeddings-moe/part_a_embeddings.pt", weights_only=True)
+part_a = torch.load("embeddings-moe/part_a_embeddings.pt", weights_only=False)
 ae_embeddings = part_a["ae_embeddings"]
 ae_labels = part_a["ae_labels"]
 con_embeddings = part_a["con_embeddings"]

@@ -203,13 +203,15 @@ print(f"  {'-'*40} {'-'*20} {'-'*5}")
 
 test_indices = torch.where(test_mask)[0][:5]
 for idx in test_indices:
-    # Query: zero image + valid text -> fused
+    # Query: zero image + valid text -> fused, then project through model
     query_text = text_embeds[idx]
     query_img = torch.zeros(EMBED_DIM)
-    query_fused = F.normalize(torch.cat([query_img, query_text]).unsqueeze(0), dim=1)
+    query_fused = torch.cat([query_img, query_text]).unsqueeze(0).to(device)
+    with torch.no_grad():
+        query_proj = F.normalize(ef_model.fuse(query_fused), dim=1).cpu()
 
     # Compare with all GNN embeddings
-    sims = torch.mm(query_fused, gnn_embeds.t()).squeeze()
+    sims = torch.mm(query_proj, gnn_embeds.t()).squeeze()
     sims[idx] = -1  # exclude self
 
     top_idx = sims.argmax().item()
@@ -227,9 +229,11 @@ print(f"  {'-'*40} {'-'*40} {'-'*5}")
 for idx in test_indices:
     query_img = img_embeds[idx]
     query_text = torch.zeros(EMBED_DIM)
-    query_fused = F.normalize(torch.cat([query_img, query_text]).unsqueeze(0), dim=1)
+    query_fused = torch.cat([query_img, query_text]).unsqueeze(0).to(device)
+    with torch.no_grad():
+        query_proj = F.normalize(ef_model.fuse(query_fused), dim=1).cpu()
 
-    sims = torch.mm(query_fused, gnn_embeds.t()).squeeze()
+    sims = torch.mm(query_proj, gnn_embeds.t()).squeeze()
     sims[idx] = -1
 
     top_idx = sims.argmax().item()

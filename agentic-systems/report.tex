@@ -1,0 +1,67 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{float}
+\usepackage[hidelinks]{hyperref}
+
+\title{Assignment 10: Agentic Systems -- Deep Research Assistant}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-1.5cm}
+
+\section{System Overview}
+
+We built a deep-research agent that takes a complex research query, decomposes it into sub-queries, searches the web for each, validates results, and synthesizes a markdown report. The system uses DuckDuckGo for web search, OpenRouter's free API (Nvidia Nemotron 120B with model fallback) for LLM calls, and implements three architectural variants.
+
+The pipeline has four stages: (1) \textbf{Decompose}: LLM breaks the query into 3--5 focused sub-queries; (2) \textbf{Search}: web search for each sub-query with result validation; (3) \textbf{Answer}: LLM answers each sub-query from its search results; (4) \textbf{Synthesize}: LLM merges all answers into a coherent markdown report.
+
+\section{Three Architecture Variants}
+
+\textbf{Sequential.} One agent processes everything step by step: decompose, then search and answer each sub-query in order. Simple and deterministic, but slow.
+
+\textbf{Parallel.} Decompose first, then dispatch all sub-query searches concurrently via a thread pool. Assumes all sub-queries are independent.
+
+\textbf{Hierarchical.} A planner agent decomposes the query with explicit dependency analysis, labelling each sub-query as independent or dependent. Independent queries run in parallel (phase 1), dependent queries run sequentially using prior answers as context (phase 2).
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lccc}
+\toprule
+Architecture & Time (s) & Report Length (chars) & Sub-queries \\
+\midrule
+Sequential & 260.8 & 13,852 & 5 \\
+Parallel & 128.7 & 12,194 & 4 \\
+Hierarchical & 290.4 & 12,866 & 5 \\
+\bottomrule
+\end{tabular}
+\caption{Architecture comparison on query about DeepSeek-R1 vs OpenAI o3.}
+\end{table}
+
+Parallel was 2$\times$ faster than sequential because all web searches ran concurrently. Hierarchical was slowest due to the extra planning LLM call and timeout on one sub-query. All three produced substantive reports with real benchmark numbers (e.g.\ DeepSeek-R1: 97.3\% on MATH-500, OpenAI o3: 96.7\% on AIME 2024).
+
+\section{Key Design Decisions}
+
+\textbf{Search validation.} Raw web results are filtered by snippet length ($>$30 chars), keyword overlap with the query, and exclusion of non-content pages. Results are ranked by a relevance score. All queries returned 4--5 validated results, confirming the filter is not too aggressive.
+
+\textbf{Query decomposition.} The Nemotron 120B model consistently produced well-structured JSON sub-queries. For the scaling laws query it generated: (1) DeepSeek-R1 performance metrics, (2) OpenAI o3 performance metrics, (3) test-time vs pre-training scaling comparison, (4) compute costs, (5) cost-effectiveness comparison. This is a sensible decomposition that isolates independent facts before attempting comparisons.
+
+\textbf{Model fallback routing.} OpenRouter's \texttt{models} + \texttt{route: "fallback"} feature automatically tries alternative free models (Step 3.5 Flash, MiniMax M2.5) when the primary model times out, which happened twice during our experiments.
+
+\section{Reflections}
+
+\textbf{Decomposition quality matters most.} The parallel architecture decomposed the first query into 4 sub-queries (vs.\ 5 for sequential/hierarchical), yet produced a comparably informative report. Fewer, more focused sub-queries can be more effective than exhaustive decomposition.
+
+\textbf{Dependency detection was unnecessary for these queries.} The hierarchical planner labelled all 5 sub-queries as independent for the scaling laws query. This is correct---comparing models A and B requires facts about each independently before comparison. For causal reasoning queries (``Why did X cause Y?''), dependencies would matter more.
+
+\textbf{Web search limitations.} Some sub-queries returned results that lacked quantitative data (e.g.\ exact FLOPs for OpenAI o3 training). The agent correctly noted these gaps in its synthesis rather than hallucinating numbers. This is a strength of the RAG-like grounding approach.
+
+\textbf{Parallel is the sweet spot.} Sequential offers no practical advantage (prior results don't inform subsequent searches for comparison queries). Hierarchical adds complexity and latency without benefit when sub-queries are independent. Parallel gives the best time/quality trade-off.
+
+\textbf{Potential improvements:} (1) Iterative refinement---let the synthesizer identify gaps and trigger additional searches; (2) Multi-source verification---cross-check facts across independent sources; (3) Adaptive architecture---detect query type (comparison vs.\ causal) and choose sequential/parallel accordingly; (4) Use OpenRouter's \texttt{web} plugin as an additional search source alongside DuckDuckGo.
+
+\end{document}

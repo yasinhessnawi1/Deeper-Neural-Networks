@@ -1,0 +1,101 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{float}
+\usepackage[hidelinks]{hyperref}
+
+\title{Assignment 9: RAG Systems}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-1.5cm}
+
+\section{System Overview}
+
+We built a Retrieval-Augmented Generation (RAG) chatbot to answer student questions about IKT courses at UiA. The pipeline has three stages: (1) scrape course descriptions from UiA's website, (2) chunk and index them into a vector database, (3) retrieve relevant chunks at query time and pass them to an LLM for answer generation.
+
+The key insight behind RAG is that LLMs have no knowledge of specific institutional data. Rather than fine-tuning (expensive and rigid), RAG injects relevant context into the prompt at query time, grounding the LLM's responses in actual data. This makes the system both cheaper to build and easier to update---when course descriptions change, we simply re-index.
+
+\section{Data Collection (Web Scraping)}
+
+We scraped 72 course pages from UiA's website using BeautifulSoup. Starting from 7 study program pages (IT bachelor, IKT, Data engineering, Cybersecurity, etc.), we collected all \texttt{/studier/emner/} links and extracted structured sections: learning outcomes, content, prerequisites, assessment methods. The scraper yielded 25 IKT courses, 18 IS courses, 9 DAT courses, and 20 supporting courses (mathematics, physics, etc.).
+
+\section{Chunking and Indexing}
+
+Each course's text was split into overlapping chunks using LangChain's \texttt{RecursiveCharacterTextSplitter}. We tested three chunk sizes:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcc}
+\toprule
+Chunk Size & Total Chunks & Avg Length (chars) \\
+\midrule
+300 & 1012 & 227 \\
+500 (used) & 599 & 356 \\
+800 & 382 & 542 \\
+\bottomrule
+\end{tabular}
+\caption{Effect of chunk size on the number and length of chunks.}
+\end{table}
+
+We chose 500 characters with 100-character overlap as a balance between retrieval precision and context completeness. Each chunk was prepended with its course code and name so retrieval results always carry identifying context.
+
+Initially we used \texttt{all-MiniLM-L6-v2} (384-d, English-only) for embeddings. This performed poorly on cross-lingual retrieval: ``cybersecurity'' returned ME-100 (research methods) instead of IKT113 (Cybersikkerhet), with distances around 0.54. After switching to \texttt{intfloat/multilingual-e5-base} (768-d, 100+ languages), retrieval quality improved dramatically---distances dropped to 0.14--0.19 and the correct courses appeared consistently.
+
+\section{RAG Chatbot}
+
+The chatbot uses OpenRouter's free API (Nvidia Nemotron 120B with fallback models) for generation. The flow: embed query $\to$ retrieve top-$k$ from ChromaDB $\to$ build augmented prompt $\to$ LLM generates answer.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lp{8cm}}
+\toprule
+Query & Answer \\
+\midrule
+Which IKT course teaches databases? & IKT105 -- Datamodellering og databaser \\
+Does UiA offer cybersecurity courses? & Yes: IKT113, IKT217, IKT100 \\
+What courses cover machine learning? & IKT213 -- Machine Vision (no dedicated ML course found) \\
+Which courses related to AI? (Norwegian) & MA-224, IKT218, IKT203 -- all part of the AI programme \\
+\bottomrule
+\end{tabular}
+\caption{Sample chatbot responses (retrieved context correctly informs answers).}
+\end{table}
+
+\subsection*{Effect of $k$}
+
+We tested $k \in \{1, 3, 5, 7\}$ on the query ``What courses are related to artificial intelligence?'':
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcl}
+\toprule
+$k$ & Avg Distance & Courses Retrieved \\
+\midrule
+1 & 0.179 & IKT203 \\
+3 & 0.183 & IKT203, IKT105, IKT103 \\
+5 & 0.186 & IKT203, IKT105, IKT103, IKT101, IKT218 \\
+7 & 0.188 & + MA-180, IKT213 \\
+\bottomrule
+\end{tabular}
+\caption{Larger $k$ adds marginally relevant courses; $k{=}3$ balances coverage and focus.}
+\end{table}
+
+The system also supports Norwegian queries natively. Asking ``hvilken kurs er relatert til KI'' retrieved MA-224, IKT218, IKT203---all correctly linked to UiA's AI programme.
+
+\section{Limitations and Improvement Ideas}
+
+\textbf{Embedding model was the bottleneck.} Switching from English-only to multilingual embeddings was the single largest quality improvement, reducing average distances by 65\% and fixing all cross-lingual retrieval failures.
+
+\textbf{Chunking granularity.} Fixed-size chunking can split a section mid-sentence. Semantic chunking (splitting at section boundaries) would produce more coherent chunks.
+
+\textbf{Re-ranking.} Adding a cross-encoder re-ranker on top-$k$ candidates would improve precision by jointly attending to query and document.
+
+\textbf{Hybrid search.} Combining dense vector search with sparse BM25 would catch exact course codes that embeddings might miss.
+
+\textbf{Agentic RAG.} Instead of a single retrieval step, an agent could iteratively refine its search: retrieve, check if the answer is sufficient, re-query with modified terms if not.
+
+\end{document}
